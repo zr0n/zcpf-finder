@@ -47,7 +47,7 @@ CPF ou máscara
   Meio do CPF:   456789  ou 456.789   → XXX.456.789-XX
   Máscara:       XXX.456.789.XX
 Digite: 456789
-Nome completo (opcional, Enter para pular): Luiz Carlos De Oliveira Junior
+Nome completo (opcional, Enter para pular): Maria Aparecida dos Santos
 Aceitar match frouxo de nome (gera falsos positivos)? [s/N]:
 ```
 
@@ -58,13 +58,13 @@ Aceitar match frouxo de nome (gera falsos positivos)? [s/N]:
 python cpf_finder.py 12345678909
 
 # Meio do CPF, filtrando por nome
-python cpf_finder.py 456789 --name "Luiz Carlos De Oliveira Junior"
+python cpf_finder.py 456789 --name "Maria Aparecida dos Santos"
 
 # Máscara explícita, com 30 workers
 python cpf_finder.py "XXX.456.789.XX" --workers 30
 
-# Aceitar match frouxo de nome (aceita "Luiz Carlos" casar com "Luiz Carlos da Silva")
-python cpf_finder.py 456789 --name "Luiz Carlos" --loose
+# Aceitar match frouxo de nome (aceita "Maria Aparecida" casar com "Maria Aparecida dos Santos Lima")
+python cpf_finder.py 456789 --name "Maria Aparecida" --loose
 ```
 
 ### Flags
@@ -80,11 +80,11 @@ python cpf_finder.py 456789 --name "Luiz Carlos" --loose
 
 A comparação de nomes é **fonética PT-BR**: `S↔Z`, `PH↔F`, `TH↔T`, `Y↔I`, `W↔V`, `K↔C`, `Ç→S`, remoção de acentos e colapso de consoantes duplicadas. Isso faz com que:
 
-- `Luiz` = `Luis`
 - `Souza` = `Sousa`
 - `Filipe` = `Philippe`
 - `Wagner` = `Vagner`
 - `Kátia` = `Cátia`
+- `Yasmin` = `Jasmin`
 
 ### Modo estrito (padrão)
 
@@ -92,9 +92,9 @@ A comparação de nomes é **fonética PT-BR**: `S↔Z`, `PH↔F`, `TH↔T`, `Y�
 
 | Nome buscado | Nome no Portal | Resultado |
 |--------------|----------------|:---------:|
-| `Luiz Carlos` | `Luiz Carlos Luiz` | ✅ passa |
-| `Luiz Carlos` | `Alcione Maria Carlos Marques De Lima` | ❌ descarta |
-| `Luiz Carlos De Oliveira Junior` | `Luiz Carlos Luiz` | ❌ descarta (faltam "de", "oliveira", "junior") |
+| `Maria Aparecida` | `Maria Aparecida dos Santos` | ✅ passa |
+| `Maria Aparecida` | `João Carlos Pereira Lima` | ❌ descarta |
+| `Maria Aparecida dos Santos Lima` | `Maria Aparecida dos Santos` | ❌ descarta (falta "lima") |
 
 ### Modo frouxo (`--loose`)
 
@@ -106,8 +106,8 @@ O arquivo `.txt` (com o mesmo nome da máscara/entrada) separa os resultados em 
 
 ```
 cpf-finder — Portal da Transparência
-Entrada       : 400.587
-Nome buscado  : Luiz Carlos Da Silva Luiz
+Entrada       : 456.789
+Nome buscado  : Maria Aparecida dos Santos
 Match de nome : estrito
 Data          : 25/11/2026 17:36:25
 Total         : 1 confirmado(s) + 2 divergente(s) de 1000 candidato(s)
@@ -115,20 +115,26 @@ Total         : 1 confirmado(s) + 2 divergente(s) de 1000 candidato(s)
 
 ### ✅ CONFIRMADOS (1) — nome bate
 
-✅ CPF: 014.400.587-32
-    Nome        : Luiz Carlos Da Silva Luiz
-    CPF (portal): CPF ***.400.587-**
-    skPessoa    : 197544772
+✅ CPF: 014.456.789-32
+    Nome        : Maria Aparecida dos Santos
+    CPF (portal): CPF ***.456.789-**
+    skPessoa    : 312987654
     Relação GF  : Beneficiário de Programa Social
 
 ### ⚠️ ENCONTRADOS COM NOME DIFERENTE (2)
 (o CPF existe no Portal, mas pertence a outra pessoa)
 
-⚠ CPF: 128.400.587-90
-    Nome        : Maria Aparecida Silva
-    CPF (portal): CPF ***.400.587-**
-    skPessoa    : 22522896
+⚠ CPF: 128.456.789-90
+    Nome        : João Carlos Pereira Lima
+    CPF (portal): CPF ***.456.789-**
+    skPessoa    : 298765432
     Relação GF  : Beneficiário de Programa Social, Favorecido de recurso público
+
+⚠ CPF: 301.456.789-15
+    Nome        : Ana Paula Ribeiro Costa
+    CPF (portal): CPF ***.456.789-**
+    skPessoa    : 276543210
+    Relação GF  : Servidor Público Federal
 ```
 
 Nenhum registro é descartado silenciosamente. Se o Portal retornar algo, você vê — mesmo que o nome não bata com o que você buscou.
@@ -136,18 +142,18 @@ Nenhum registro é descartado silenciosamente. Se o Portal retornar algo, você 
 ## Progresso no terminal
 
 ```
-→ Contexto: amostra do que existe no Portal para 'Luiz Carlos'
+→ Contexto: amostra do que existe no Portal para 'Maria Aparecida'
    → 10000 registro(s) no Portal
    → Primeiros 5:
-      - Luiz Carlos Luiz  (CPF ***.438.478-**)  skPessoa=219211466
-      - Luiz Carlos Luiz  (CPF ***.733.609-**)  skPessoa=193536974
+      - Maria Aparecida dos Santos  (CPF ***.438.478-**)  skPessoa=219211466
+      - Maria Aparecida Lima        (CPF ***.733.609-**)  skPessoa=193536974
       ...
 
 → Testando 1000 CPF(s) candidato(s) (match de nome: estrito)
-[0001/1000] 000.400.587-XX ... não encontrado
-[0002/1000] 001.400.587-XX ... não encontrado
+[0001/1000] 000.456.789-XX ... não encontrado
+[0002/1000] 001.456.789-XX ... não encontrado
 ...
-[0123/1000] 122.400.587-45 ... ✓ ENCONTRADO — Luiz Carlos Da Silva Luiz
+[0123/1000] 122.456.789-45 ... ✓ ENCONTRADO — Maria Aparecida dos Santos
 ...
 Encontrados : 1
 ```
@@ -184,7 +190,6 @@ Se o CPF que você procura **não tiver vínculo federal**, ele simplesmente **n
 ##  Contributors
 
 [LuixCarlos00](https://github.com/LuixCarlos00)
-
 
 ## Licença
 
