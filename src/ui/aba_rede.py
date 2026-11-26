@@ -65,7 +65,7 @@ class AbaRede(ttk.Frame):
             tema (Tema): tema ativo.
             servico (ServicoCnpj): fila/cache/limite compartilhados.
             abrir_detalhe (Callable[[str], None]): mostra um CNPJ na aba "Consulta CNPJ".
-            buscar_cpf (Callable[[str, str], None]): preenche a aba "Busca de CPF" com (meio, nome).
+            buscar_cpf (Callable[[str, str], None]): preenche a aba "Busca de pessoa" com (meio, nome).
         """
         super().__init__(pai, padding=(0, 12, 0, 0))
         self.tema, self.servico, self.abrir_detalhe = tema, servico, abrir_detalhe
@@ -115,7 +115,7 @@ class AbaRede(ttk.Frame):
         self.btn_montar.grid(row=0, column=5)
         self.lbl_info = ttk.Label(cartao, style="Dica.TLabel",
                                   text="Segue só sócios que são empresas. Duplo clique: empresa → detalhe; "
-                                       "pessoa física → leva para a Busca de CPF.")
+                                       "pessoa física → leva para a Busca de pessoa.")
         self.lbl_info.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     def _montar_arvore(self):
@@ -130,7 +130,7 @@ class AbaRede(ttk.Frame):
     def _acoes_da_linha(self, iid: str) -> list:
         """Menu de contexto: empresa → abrir detalhe; sócio pessoa física → buscar CPF na 1ª aba."""
         if meio_cpf(self.tabela.tree.set(iid, "cnpj")):
-            return [("Buscar CPF deste sócio (aba Busca de CPF)", self._buscar_cpf_selecionado)]
+            return [("Buscar CPF deste sócio (aba Busca de pessoa)", self._buscar_cpf_selecionado)]
         return [("Abrir detalhe da empresa", self._abrir_selecionado)]
 
     def _buscar_cpf_selecionado(self):

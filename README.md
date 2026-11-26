@@ -40,14 +40,16 @@ python src/app_tk.py
 
 Quatro abas (atalhos `Ctrl+1` a `Ctrl+4`; `Esc` cancela a operação da aba atual), tema claro/escuro no canto superior direito:
 
-- **Busca de CPF:** mesma busca por máscara do modo linha de comando, com prévia de quantos candidatos serão testados, botão Cancelar (ou `Esc`), exportação CSV/TXT e busca profunda no Jusbrasil quando há um único confirmado.
+- **Busca de pessoa:** uma tela só para CPF/máscara + nome, com a opção **Buscar em**:
+  - **Portal da Transparência:** mesma busca por máscara do modo linha de comando, com prévia de quantos candidatos serão testados, botão Cancelar (ou `Esc`), exportação CSV/TXT e busca profunda no Jusbrasil quando há um único confirmado. Botão direito num resultado → "Abrir no Jusbrasil (navegador)".
+  - **Jusbrasil:** abre a busca de processos no navegador pelo CPF completo ou, sem ele, pelo nome (o Jusbrasil bloqueia consultas automáticas via Cloudflare).
 - **Consulta CNPJ:** dados cadastrais pela [API pública do CNPJ.ws](https://docs.cnpj.ws/referencia-de-api/api-publica/consultando-cnpj) — resumo (situação, endereço, capital social, Simples/MEI), sócios, atividades (CNAE), inscrições estaduais e o JSON bruto, com opção de copiar o resumo ou salvar o JSON.
   - Limite da API: **3 consultas por minuto**. A tela mostra quantas restam e faz contagem regressiva quando o limite acaba.
   - CNPJs já consultados na sessão ficam em cache e não gastam consulta.
   - O CPF de sócio pessoa física é exibido mascarado (`***.123.456-**`), como a Receita publica; o JSON salvo mantém o que a API devolveu.
   - Botão "Processos no Jusbrasil ↗" abre a busca no navegador (o Jusbrasil bloqueia acesso automatizado via Cloudflare).
 - **Rede de empresas:** a partir de um CNPJ, consulta automaticamente os sócios que são **empresas**, e os sócios delas, até a profundidade escolhida (1–4) e um máximo de empresas. Mostra tudo em árvore; sócios pessoa física são apenas listados (mascarados) e **não** são pesquisados automaticamente. Exporta CSV.
-- **Sócio pessoa física → Busca de CPF:** na Rede ou na sub-aba "Sócios" da Consulta CNPJ, duplo clique (ou botão direito → "Buscar CPF deste sócio") leva à primeira aba com o meio do CPF e o nome já preenchidos. A busca **só começa quando você clica em Buscar** — um sócio por vez.
+- **Sócio pessoa física → Busca de pessoa:** na Rede ou na sub-aba "Sócios" da Consulta CNPJ, duplo clique (ou botão direito → "Buscar CPF deste sócio") leva à primeira aba com o meio do CPF e o nome já preenchidos. A busca **só começa quando você clica em Buscar** — um sócio por vez.
 - **Lote de CNPJs:** cole uma lista (qualquer formato, inclusive CSV) ou importe `.txt`/`.csv`; mostra válidos/inválidos e tempo estimado antes de começar, consulta todos e exporta CSV completo. Números de 12–13 dígitos ganham o zero à esquerda que o Excel costuma apagar.
 
 As três abas de CNPJ compartilham **uma única fila**, cache e o limite de 3/min: a consulta manual fura a fila, pedidos repetidos viram uma consulta só, e uma resposta 429 recoloca o pedido na fila em vez de perdê-lo. Duplo clique numa empresa da rede ou do lote abre o detalhe na aba "Consulta CNPJ" sem gastar consulta.
@@ -60,10 +62,12 @@ Estrutura:
 | `src/cpf_finder.py` | Motor da busca de CPF (também roda sozinho pela linha de comando) |
 | `src/caminhos.py` | Caminho da pasta `resultados/` |
 | `resultados/` | Buscas salvas e exportações (fora do git) |
+| `src/assets/` | Ícone do app (favicon) |
 | `tests/` | Testes (`pytest`) |
 | `src/ui/tema.py` | Paletas, fontes, estilos ttk e balões de dica (ⓘ) |
 | `src/ui/widgets.py` | Tabela ordenável e área de log reutilizáveis |
-| `src/ui/aba_*.py` | Cada aba |
+| `src/ui/aba_pessoa.py` | Busca de pessoa (Portal ou Jusbrasil) |
+| `src/ui/aba_cnpj.py`, `aba_rede.py`, `aba_lote.py` | Abas de CNPJ |
 | `src/ui/servico_cnpj.py` | Fila + cache + limite compartilhados pelas abas de CNPJ |
 | `src/fila_cnpj.py` | Fila de consultas (sem interface, testável) |
 | `src/cnpj_ws.py` | Cliente da API do CNPJ.ws (validação, consulta, limite, extração de CNPJs de texto) |

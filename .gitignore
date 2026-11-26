@@ -8,3 +8,8 @@ resultados/
 
 __pycache__/
 .pytest_cache/
+
+# Ícones do app (exceção às regras de *.png/*.ico acima).
+!src/assets/
+!src/assets/*.png
+!src/assets/*.ico

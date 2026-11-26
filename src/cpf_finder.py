@@ -220,13 +220,27 @@ def _parse_json(data: dict) -> tuple[int, list[dict]]:
     return total, records
 
 
-async def query_term(
+async def query_term_status(
     session: aiohttp.ClientSession,
     term: str,
     page: int,
     page_size: int,
     sem: asyncio.Semaphore,
-) -> tuple[int, list[dict]]:
+) -> tuple[int, list[dict], bool]:
+    """Consulta o Portal com até 3 tentativas, distinguindo "sem resultado" de "falhou".
+
+    Args:
+        session (aiohttp.ClientSession): sessão HTTP.
+        term (str): CPF a consultar.
+        page (int): página (1-based).
+        page_size (int): tamanho da página.
+        sem (asyncio.Semaphore): limita a concorrência.
+
+    Returns:
+        tuple[int, list[dict], bool]: (total de registros, registros, falhou). ``falhou=True``
+        só quando todas as tentativas se esgotaram sem uma resposta utilizável — diferente de
+        ``falhou=False`` com lista vazia, que significa "o CPF não existe no Portal".
+    """
     async with sem:
         params = {
             "termo": term, "letraInicial": "",
@@ -241,7 +255,8 @@ async def query_term(
                 ) as resp:
                     if resp.status == 200:
                         try:
-                            return _parse_json(await resp.json(content_type=None))
+                            total, recs = _parse_json(await resp.json(content_type=None))
+                            return total, recs, False
                         except Exception:
                             pass
                     elif resp.status in (429, 503):
@@ -250,7 +265,19 @@ async def query_term(
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 await asyncio.sleep(1 + attempt)
                 continue
-        return (0, [])
+        return (0, [], True)
+
+
+async def query_term(
+    session: aiohttp.ClientSession,
+    term: str,
+    page: int,
+    page_size: int,
+    sem: asyncio.Semaphore,
+) -> tuple[int, list[dict]]:
+    """Versão 2-tupla de :func:`query_term_status` (mantida para compatibilidade)."""
+    total, recs, _falhou = await query_term_status(session, term, page, page_size, sem)
+    return total, recs
 
 
 # ── Loop principal ─────────────────────────────────────────────────────────

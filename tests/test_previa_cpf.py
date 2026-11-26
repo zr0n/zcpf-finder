@@ -1,10 +1,10 @@
-"""Testes da prévia de interpretação da máscara de CPF (aba de CPF)."""
+"""Testes da prévia de interpretação da máscara de CPF (aba Busca de pessoa)."""
 
 from __future__ import annotations
 
 import pytest
 
-from ui.aba_cpf import descrever_entrada
+from ui.aba_pessoa import descrever_entrada
 from ui.widgets import formatar_numero
 
 

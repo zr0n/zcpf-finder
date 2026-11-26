@@ -1,4 +1,9 @@
-"""Aba "Busca de CPF": máscara → candidatos → Portal da Transparência (+ busca profunda no Jusbrasil)."""
+"""Aba "Busca de pessoa": CPF/máscara + nome, com a fonte escolhida na própria tela.
+
+Junta a antiga "Busca de CPF" e a "Busca por Nome" numa tela só:
+  - Portal da Transparência → máscara → candidatos → Portal (cpf_finder), + busca profunda no Jusbrasil;
+  - Jusbrasil → abre a busca no navegador pelo CPF completo ou pelo nome (jusbrasil.url_busca_pessoa).
+"""
 
 from __future__ import annotations
 
@@ -15,11 +20,20 @@ from tkinter import filedialog, messagebox, ttk
 
 import aiohttp
 
-from cpf_finder import _API_HEADERS, fmt, generate_candidates, names_match, query_term
-from jusbrasil import scrape_jusbrasil_by_cpf
 from caminhos import pasta_resultados
+from cpf_finder import _API_HEADERS, fmt, generate_candidates, names_match, query_term_status
+from jusbrasil import scrape_jusbrasil_by_cpf, url_busca_pessoa
 from ui.tema import Tema, icone_dica
 from ui.widgets import AreaLog, Tabela, adicionar_cartao, formatar_numero
+
+FONTE_PORTAL = "portal"
+FONTE_JUSBRASIL = "jusbrasil"
+DICA_FONTE = (
+    "Portal da Transparência: aceita CPF completo, meio do CPF ou máscara com X; gera os candidatos "
+    "e consulta cada um. O nome (opcional) separa confirmados e divergentes.\n\n"
+    "Jusbrasil: abre a busca de processos no navegador — pelo CPF completo, ou pelo nome quando não "
+    "houver CPF completo. O Jusbrasil bloqueia consultas automáticas, por isso não roda dentro do programa."
+)
 
 INTERVALO_FILA_MS = 100
 # Acima disso a busca leva muito tempo e gera muita requisição: pedimos confirmação.
@@ -88,8 +102,13 @@ def descrever_entrada(raw: str) -> tuple[str, int] | None:
     return f"{mascara[:3]}.{mascara[3:6]}.{mascara[6:9]}-{mascara[9:]}", total
 
 
-class AbaCpf(ttk.Frame):
-    """Busca de CPF por máscara no Portal da Transparência."""
+class AbaPessoa(ttk.Frame):
+    """Busca de pessoa por CPF/máscara e nome, com escolha da fonte: Portal ou Jusbrasil.
+
+    - Portal: gera os candidatos da máscara e consulta o Portal da Transparência (cpf_finder).
+    - Jusbrasil: abre a busca no navegador, pelo CPF completo ou pelo nome. O Jusbrasil
+      bloqueia acesso automatizado (Cloudflare), então não há consulta por script aqui.
+    """
 
     def __init__(self, pai: tk.Widget, tema: Tema):
         """Monta a aba e começa a consumir a fila de eventos da busca.
@@ -106,6 +125,7 @@ class AbaCpf(ttk.Frame):
         self.searching = False
         self._cancelar = threading.Event()
         self._inicio = 0.0
+        self._falhas = 0  # candidatos cujas 3 tentativas no Portal se esgotaram
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -142,8 +162,23 @@ class AbaCpf(ttk.Frame):
                   ).grid(row=2, column=1, rowspan=2, sticky="nw", pady=(6, 0))
 
         ttk.Separator(cartao).grid(row=4, column=0, columnspan=2, sticky="ew", pady=14)
+
+        # Fonte da busca: decide se os controles do Portal (workers, match, SSL) se aplicam.
+        fonte = ttk.Frame(cartao, style="Painel.TFrame")
+        fonte.grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        ttk.Label(fonte, text="Buscar em", style="Secao.TLabel").pack(side=tk.LEFT, padx=(0, 12))
+        self.var_fonte = tk.StringVar(value=FONTE_PORTAL)
+        self.var_fonte.trace_add("write", lambda *_: self._ao_trocar_fonte())
+        self.radios_fonte = [
+            ttk.Radiobutton(fonte, text=rotulo, value=valor, variable=self.var_fonte, style="Painel.TRadiobutton")
+            for valor, rotulo in ((FONTE_PORTAL, "Portal da Transparência"), (FONTE_JUSBRASIL, "Jusbrasil"))
+        ]
+        for radio in self.radios_fonte:
+            radio.pack(side=tk.LEFT, padx=(0, 16))
+        icone_dica(fonte, DICA_FONTE, self.tema).pack(side=tk.LEFT)
+
         linha = ttk.Frame(cartao, style="Painel.TFrame")
-        linha.grid(row=5, column=0, columnspan=2, sticky="ew")
+        linha.grid(row=6, column=0, columnspan=2, sticky="ew")
         linha.columnconfigure(3, weight=1)
 
         opt_workers = ttk.Frame(linha, style="Painel.TFrame")
@@ -166,8 +201,17 @@ class AbaCpf(ttk.Frame):
 
         for entry in (self.entry_cpf, self.entry_nome):
             entry.bind("<Return>", lambda _e: self._on_search())
-        self._controles_busca = [self.entry_cpf, self.entry_nome, self.spin_workers,
-                                 self.chk_loose, self.chk_insecure, self.btn_limpar]
+        self._controles_portal = [self.spin_workers, self.chk_loose, self.chk_insecure]
+        self._controles_busca = [self.entry_cpf, self.entry_nome, *self.radios_fonte,
+                                 *self._controles_portal, self.btn_limpar]
+
+    def _ao_trocar_fonte(self):
+        """Opções de workers/match/SSL só valem para o Portal; no Jusbrasil ficam desativadas."""
+        portal = self.var_fonte.get() == FONTE_PORTAL
+        for w in self._controles_portal:
+            w.configure(state="normal" if portal else "disabled")
+        self.btn_buscar.configure(text="Buscar" if portal else "Abrir no Jusbrasil ↗")
+        self._atualizar_previa()
 
     def _opcao(self, pai, coluna: int, texto: str, var: tk.BooleanVar, dica: str) -> ttk.Checkbutton:
         caixa = ttk.Frame(pai, style="Painel.TFrame")
@@ -185,10 +229,12 @@ class AbaCpf(ttk.Frame):
 
         self.notebook = ttk.Notebook(area)
         self.notebook.grid(row=0, column=0, sticky="nsew")
-        self.tab_conf = self._aba("Confirmados",
-                                  lambda p: Tabela(p, self.tema, COLUNAS, self._status, coluna_copia="cpf"))
-        self.tab_div = self._aba("Divergentes",
-                                 lambda p: Tabela(p, self.tema, COLUNAS, self._status, coluna_copia="cpf"))
+        self.tab_conf = self._aba("Confirmados", lambda p: Tabela(
+            p, self.tema, COLUNAS, self._status, coluna_copia="cpf",
+            acoes_extras=[("Abrir no Jusbrasil (navegador)", lambda: self._jusbrasil_da_linha(self.tab_conf))]))
+        self.tab_div = self._aba("Divergentes", lambda p: Tabela(
+            p, self.tema, COLUNAS, self._status, coluna_copia="cpf",
+            acoes_extras=[("Abrir no Jusbrasil (navegador)", lambda: self._jusbrasil_da_linha(self.tab_div))]))
         self.tab_jus = self._aba("Jusbrasil", lambda p: Tabela(
             p, self.tema, COLUNAS_JUS, self._status, coluna_copia="url",
             acoes_extras=[("Abrir perfil no navegador", self._abrir_perfil_jusbrasil)],
@@ -230,6 +276,9 @@ class AbaCpf(ttk.Frame):
     def _atualizar_previa(self):
         """Mostra abaixo do campo como a entrada será lida e quantos CPFs serão testados."""
         texto = self.var_cpf.get().strip()
+        if getattr(self, "var_fonte", None) and self.var_fonte.get() == FONTE_JUSBRASIL:
+            self._previa_jusbrasil(texto)
+            return
         if not texto:
             self.lbl_previa.configure(text="Digite um CPF, o meio dele ou uma máscara com X.", style="Dica.TLabel")
             return
@@ -303,6 +352,7 @@ class AbaCpf(ttk.Frame):
         if self.searching:
             self.lbl_status.configure(text="Há uma busca em andamento; aguarde ou cancele antes.")
             return False
+        self.var_fonte.set(FONTE_PORTAL)  # máscara de sócio só faz sentido no Portal
         self.var_cpf.set(f"{meio[:3]}.{meio[3:]}")
         self.entry_nome.delete(0, "end")
         self.entry_nome.insert(0, nome)
@@ -310,9 +360,61 @@ class AbaCpf(ttk.Frame):
         self.btn_buscar.focus_set()
         return True
 
+    # ── Jusbrasil (navegador) ──────────────────────────────────────────────
+    def _previa_jusbrasil(self, texto: str):
+        """Mesma prévia do Portal (máscara + nº de candidatos), avisando que o Jusbrasil não aceita máscara."""
+        previa = descrever_entrada(texto) if texto else None
+        if previa and previa[1] == 1:
+            self.lbl_previa.configure(text=f"{previa[0]}   ·   Jusbrasil: busca pelo CPF completo",
+                                      style="Previa.TLabel")
+        elif previa:
+            mascara, total = previa
+            self.lbl_previa.configure(
+                text=f"{mascara}   ·   até {formatar_numero(total)} candidatos   ·   valide no Portal primeiro",
+                style="PreviaAlerta.TLabel")
+        else:
+            self.lbl_previa.configure(text="Jusbrasil: sem CPF, a busca usa o nome", style="Dica.TLabel")
+
+    def _buscar_jusbrasil(self):
+        previa = descrever_entrada(self.var_cpf.get().strip()) if self.var_cpf.get().strip() else None
+        if previa and previa[1] > 1:
+            # Máscara: o Jusbrasil não testa candidatos. O Portal filtra os que existem;
+            # cada resultado pode então ser aberto no Jusbrasil (botão direito).
+            mascara, total = previa
+            if messagebox.askyesno(
+                "Jusbrasil não aceita máscara",
+                f"{mascara} gera até {formatar_numero(total)} candidatos, e o Jusbrasil só busca "
+                "por CPF completo ou nome.\n\nValidar os candidatos no Portal da Transparência agora?\n"
+                "Depois, clique com o botão direito no resultado → \"Abrir no Jusbrasil\".",
+            ):
+                self.var_fonte.set(FONTE_PORTAL)
+                self._on_search()
+                return
+            if not self.entry_nome.get().strip():
+                return
+        try:
+            url = url_busca_pessoa(self.var_cpf.get(), self.entry_nome.get())
+        except ValueError as e:
+            messagebox.showerror("Jusbrasil", str(e))
+            self.entry_nome.focus_set()
+            return
+        webbrowser.open(url)
+        self.lbl_status.configure(text="Busca aberta no navegador (Jusbrasil).")
+
+    def _jusbrasil_da_linha(self, tabela: Tabela):
+        sel = tabela.tree.selection()
+        if not sel:
+            return
+        cpf = tabela.tree.set(sel[0], "cpf")
+        webbrowser.open(url_busca_pessoa(cpf, tabela.tree.set(sel[0], "nome")))
+        self._status(f"Jusbrasil aberto no navegador para {cpf}.")
+
     # ── Busca ──────────────────────────────────────────────────────────────
     def _on_search(self):
         if self.searching:
+            return
+        if self.var_fonte.get() == FONTE_JUSBRASIL:
+            self._buscar_jusbrasil()
             return
         entrada = self.var_cpf.get().strip()
         if not entrada:
@@ -341,6 +443,7 @@ class AbaCpf(ttk.Frame):
 
         self._limpar_resultados()
         self._cancelar.clear()
+        self._falhas = 0
         self._inicio = time.monotonic()
         self._set_buscando(True)
         self.progress.configure(maximum=max(1, len(candidates)), value=0)
@@ -377,9 +480,13 @@ class AbaCpf(ttk.Frame):
                         return
                     formatted = fmt(cpf)
                     try:
-                        _tot, recs = await query_term(session, cpf, 1, 10, sem)
+                        _tot, recs, falhou = await query_term_status(session, cpf, 1, 10, sem)
                     except Exception:
-                        recs = []
+                        recs, falhou = [], True
+
+                    if falhou:
+                        # Esgotou as 3 tentativas: conta como falha, não como "não existe".
+                        self.queue.put(("falha", formatted))
 
                     if recs:
                         if nome:
@@ -471,15 +578,30 @@ class AbaCpf(ttk.Frame):
                 elif kind == "progress":
                     progresso += 1
 
+                elif kind == "falha":
+                    self._falhas += 1
+                    # Só registra as primeiras no log para não poluir em buscas grandes.
+                    if self._falhas <= 10:
+                        self.log.escrever(f"✗ {msg[1]} — Portal não respondeu (após 3 tentativas)", "erro")
+                    elif self._falhas == 11:
+                        self.log.escrever("… (demais falhas omitidas do log)", "erro")
+
                 elif kind in ("done", "cancelled"):
                     self._aplicar_progresso(progresso)
                     progresso = 0
                     self._set_buscando(False)
                     resumo = (f"{len(self.confirmados)} confirmado(s), {len(self.divergentes)} divergente(s) "
                               f"em {self._decorrido()}")
+                    if self._falhas:
+                        # Falhas importam: um candidato que falhou pode ser o CPF certo não testado.
+                        resumo += f"  ·  {self._falhas} falha(s) de rede"
                     if kind == "done":
                         self.lbl_status.configure(text=f"Concluído: {resumo}.")
-                        self.log.escrever(f"Fim: {resumo}", "ok")
+                        self.log.escrever(f"Fim: {resumo}", "aviso" if self._falhas else "ok")
+                        if self._falhas:
+                            self.log.escrever(
+                                "Atenção: candidatos que falharam não foram verificados. "
+                                "Reduza as requisições simultâneas e rode de novo para cobri-los.", "aviso")
                         self.after(200, self._oferecer_busca_profunda)
                     else:
                         self.lbl_status.configure(text=f"Cancelado: {resumo}.")

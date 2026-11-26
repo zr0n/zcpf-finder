@@ -114,10 +114,11 @@ class Tema:
                         padding=5, arrowcolor=c["suave"], background=c["painel"])
             e.map(estilo, bordercolor=[("focus", c["destaque"])],
                   fieldbackground=[("disabled", c["fundo"])], foreground=[("disabled", c["suave"])])
-        e.configure("Painel.TCheckbutton", background=c["painel"], foreground=c["texto"],
-                    indicatorbackground=c["campo"], indicatorforeground=c["destaque"])
-        e.map("Painel.TCheckbutton", background=[("active", c["painel"])],
-              indicatorbackground=[("selected", c["campo"])], foreground=[("disabled", c["suave"])])
+        for estilo in ("Painel.TCheckbutton", "Painel.TRadiobutton"):
+            e.configure(estilo, background=c["painel"], foreground=c["texto"],
+                        indicatorbackground=c["campo"], indicatorforeground=c["destaque"])
+            e.map(estilo, background=[("active", c["painel"])],
+                  indicatorbackground=[("selected", c["campo"])], foreground=[("disabled", c["suave"])])
 
         # Abas principais (nível 1) e sub-abas de resultado (nível 2, dentro do cartão branco).
         e.configure("TNotebook", background=c["fundo"], borderwidth=0, tabmargins=(0, 0, 0, 0))

@@ -32,6 +32,31 @@ def url_busca(termo: str) -> str:
     return f"{JUSBRASIL_BUSCA_URL}?q={quote(consulta)}"
 
 
+def url_busca_pessoa(cpf: str, nome: str) -> str:
+    """Escolhe o melhor termo para buscar uma pessoa no Jusbrasil (no navegador).
+
+    CPF completo (11 dígitos, sem X) tem prioridade por ser exato; senão usa o nome.
+    Máscara/meio de CPF não serve: o Jusbrasil não busca por CPF parcial.
+
+    Args:
+        cpf (str): CPF digitado (completo, máscara ou vazio).
+        nome (str): nome digitado (pode ser vazio).
+
+    Returns:
+        str: URL da busca.
+
+    Raises:
+        ValueError: sem CPF completo e sem nome com pelo menos 2 palavras.
+    """
+    cpf = cpf or ""
+    if "X" not in cpf.upper() and len(re.sub(r"\D", "", cpf)) == 11:
+        return url_busca(cpf)
+    nome = " ".join((nome or "").split())
+    if len(nome.split()) >= 2:
+        return url_busca(nome)
+    raise ValueError("Para o Jusbrasil informe o CPF completo (11 dígitos) ou o nome com sobrenome.")
+
+
 async def scrape_jusbrasil_by_cpf(cpf: str, timeout: int = 30) -> dict:
     """Faz scraping da página pública do Jusbrasil para um CPF.
 

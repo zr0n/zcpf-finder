@@ -109,7 +109,7 @@ class AbaCnpj(ttk.Frame):
             pai (tk.Widget): notebook principal.
             tema (Tema): tema ativo.
             servico (ServicoCnpj): fila/cache/limite compartilhados com as outras abas de CNPJ.
-            buscar_cpf (Callable[[str, str], None]): preenche a aba "Busca de CPF" com (meio, nome).
+            buscar_cpf (Callable[[str, str], None]): preenche a aba "Busca de pessoa" com (meio, nome).
         """
         super().__init__(pai, padding=(0, 12, 0, 0))
         self.tema = tema
@@ -197,7 +197,7 @@ class AbaCnpj(ttk.Frame):
         """Menu do sócio: pessoa física → busca de CPF; pessoa jurídica → consultar a empresa."""
         documento = self.tab_socios.tree.set(iid, "documento")
         if meio_cpf(documento):
-            return [("Buscar CPF deste sócio (aba Busca de CPF)", self._abrir_socio)]
+            return [("Buscar CPF deste sócio (aba Busca de pessoa)", self._abrir_socio)]
         if len(limpar_cnpj(documento)) in (8, 14):
             return [("Consultar esta empresa", self._abrir_socio)]
         return []
