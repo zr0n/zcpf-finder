@@ -32,12 +32,51 @@ pip install aiohttp
 
 Não precisa mais de Playwright nem de Chrome. Toda a comunicação é feita via `aiohttp` direto na API pública do Portal.
 
+## Interface gráfica
+
+```bash
+python src/app_tk.py
+```
+
+Quatro abas (atalhos `Ctrl+1` a `Ctrl+4`; `Esc` cancela a operação da aba atual), tema claro/escuro no canto superior direito:
+
+- **Busca de CPF:** mesma busca por máscara do modo linha de comando, com prévia de quantos candidatos serão testados, botão Cancelar (ou `Esc`), exportação CSV/TXT e busca profunda no Jusbrasil quando há um único confirmado.
+- **Consulta CNPJ:** dados cadastrais pela [API pública do CNPJ.ws](https://docs.cnpj.ws/referencia-de-api/api-publica/consultando-cnpj) — resumo (situação, endereço, capital social, Simples/MEI), sócios, atividades (CNAE), inscrições estaduais e o JSON bruto, com opção de copiar o resumo ou salvar o JSON.
+  - Limite da API: **3 consultas por minuto**. A tela mostra quantas restam e faz contagem regressiva quando o limite acaba.
+  - CNPJs já consultados na sessão ficam em cache e não gastam consulta.
+  - O CPF de sócio pessoa física é exibido mascarado (`***.123.456-**`), como a Receita publica; o JSON salvo mantém o que a API devolveu.
+  - Botão "Processos no Jusbrasil ↗" abre a busca no navegador (o Jusbrasil bloqueia acesso automatizado via Cloudflare).
+- **Rede de empresas:** a partir de um CNPJ, consulta automaticamente os sócios que são **empresas**, e os sócios delas, até a profundidade escolhida (1–4) e um máximo de empresas. Mostra tudo em árvore; sócios pessoa física são apenas listados (mascarados) e **não** são pesquisados automaticamente. Exporta CSV.
+- **Sócio pessoa física → Busca de CPF:** na Rede ou na sub-aba "Sócios" da Consulta CNPJ, duplo clique (ou botão direito → "Buscar CPF deste sócio") leva à primeira aba com o meio do CPF e o nome já preenchidos. A busca **só começa quando você clica em Buscar** — um sócio por vez.
+- **Lote de CNPJs:** cole uma lista (qualquer formato, inclusive CSV) ou importe `.txt`/`.csv`; mostra válidos/inválidos e tempo estimado antes de começar, consulta todos e exporta CSV completo. Números de 12–13 dígitos ganham o zero à esquerda que o Excel costuma apagar.
+
+As três abas de CNPJ compartilham **uma única fila**, cache e o limite de 3/min: a consulta manual fura a fila, pedidos repetidos viram uma consulta só, e uma resposta 429 recoloca o pedido na fila em vez de perdê-lo. Duplo clique numa empresa da rede ou do lote abre o detalhe na aba "Consulta CNPJ" sem gastar consulta.
+
+Estrutura:
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `src/app_tk.py` | Janela principal: cabeçalho + abas |
+| `src/cpf_finder.py` | Motor da busca de CPF (também roda sozinho pela linha de comando) |
+| `src/caminhos.py` | Caminho da pasta `resultados/` |
+| `resultados/` | Buscas salvas e exportações (fora do git) |
+| `tests/` | Testes (`pytest`) |
+| `src/ui/tema.py` | Paletas, fontes, estilos ttk e balões de dica (ⓘ) |
+| `src/ui/widgets.py` | Tabela ordenável e área de log reutilizáveis |
+| `src/ui/aba_*.py` | Cada aba |
+| `src/ui/servico_cnpj.py` | Fila + cache + limite compartilhados pelas abas de CNPJ |
+| `src/fila_cnpj.py` | Fila de consultas (sem interface, testável) |
+| `src/cnpj_ws.py` | Cliente da API do CNPJ.ws (validação, consulta, limite, extração de CNPJs de texto) |
+| `src/jusbrasil.py` | Scraping da página pública do Jusbrasil |
+
+Testes: `pytest` (não acessam a rede).
+
 ## Uso
 
 ### Modo interativo
 
 ```bash
-python cpf_finder.py
+python src/cpf_finder.py
 ```
 
 Fluxo:
@@ -55,16 +94,16 @@ Aceitar match frouxo de nome (gera falsos positivos)? [s/N]:
 
 ```bash
 # CPF completo
-python cpf_finder.py 12345678909
+python src/cpf_finder.py 12345678909
 
 # Meio do CPF, filtrando por nome
-python cpf_finder.py 456789 --name "Maria Aparecida dos Santos"
+python src/cpf_finder.py 456789 --name "Maria Aparecida dos Santos"
 
 # Máscara explícita, com 30 workers
-python cpf_finder.py "XXX.456.789.XX" --workers 30
+python src/cpf_finder.py "XXX.456.789.XX" --workers 30
 
 # Aceitar match frouxo de nome (aceita "Maria Aparecida" casar com "Maria Aparecida dos Santos Lima")
-python cpf_finder.py 456789 --name "Maria Aparecida" --loose
+python src/cpf_finder.py 456789 --name "Maria Aparecida" --loose
 ```
 
 ### Flags
@@ -102,7 +141,7 @@ Aceita match parcial — se pelo menos **2 tokens** coincidem, ou se algum token
 
 ## Saída
 
-O arquivo `.txt` (com o mesmo nome da máscara/entrada) separa os resultados em **duas seções**:
+O arquivo `.txt` (com o mesmo nome da máscara/entrada) é salvo na pasta `resultados/` — onde também abrem, por padrão, as janelas de exportação da interface (CSV/TXT/JSON). A pasta está no `.gitignore`: são dados pessoais e não devem ir para o repositório. O arquivo separa os resultados em **duas seções**:
 
 ```
 cpf-finder — Portal da Transparência

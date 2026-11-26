@@ -2,3 +2,9 @@
 *.html
 *.txt
 !requirements.txt
+
+# Buscas salvas e exportações (CSV/JSON/TXT) — dados pessoais, nunca versionar.
+resultados/
+
+__pycache__/
+.pytest_cache/

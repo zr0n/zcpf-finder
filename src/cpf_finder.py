@@ -11,6 +11,8 @@ from difflib import SequenceMatcher
 
 import aiohttp
 
+from caminhos import pasta_resultados
+
 
 # ── Constantes ───────────────────────────────────────────────────────────────
 
@@ -353,7 +355,7 @@ def _save(mask: str, resultado: dict, total: int,
     divergentes = resultado["divergentes"]
 
     safe = re.sub(r"[^\w.\-]", "_", mask) or "resultado"
-    output_file = f"{safe}.txt"
+    output_file = pasta_resultados() / f"{safe}.txt"
 
     print("-" * 55)
     print(f"Confirmados        : {len(confirmados)}")
