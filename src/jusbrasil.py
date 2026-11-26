@@ -15,32 +15,48 @@ import aiohttp
 JUSBRASIL_BUSCA_URL = "https://www.jusbrasil.com.br/consulta-processual/busca"
 
 
-def url_busca(termo: str) -> str:
+def url_busca(termo: str, uf: str | None = None, faixa_etaria: str | None = None) -> str:
     """Monta a URL da busca processual do Jusbrasil para abrir no navegador.
 
     O Jusbrasil protege a página com Cloudflare (acesso por script recebe 403),
-    então para CNPJ a integração é só abrir a busca no navegador do usuário.
+    então a integração é só abrir a busca no navegador do usuário. UF e faixa
+    etária são os mesmos filtros que o site aceita na query (``uf`` e
+    ``faixaEtaria``); valem para busca por nome e são ignorados numa busca por CPF.
 
     Args:
         termo (str): CPF/CNPJ (pontuação é removida) ou nome.
+        uf (str | None): sigla do estado (ex.: "MG") para filtrar, ou None.
+        faixa_etaria (str | None): faixa etária no formato do Jusbrasil
+            (ex.: "entre_25_e_44"), ou None.
 
     Returns:
         str: URL da busca.
     """
     digitos = re.sub(r"\D", "", termo)
     consulta = digitos if len(digitos) in (11, 14) else termo.strip()
-    return f"{JUSBRASIL_BUSCA_URL}?q={quote(consulta)}"
+    url = f"{JUSBRASIL_BUSCA_URL}?q={quote(consulta)}"
+    if uf:
+        url += f"&uf={quote(uf)}"
+    if faixa_etaria:
+        url += f"&faixaEtaria={quote(faixa_etaria)}"
+    return url
 
 
-def url_busca_pessoa(cpf: str, nome: str) -> str:
+def url_busca_pessoa(cpf: str, nome: str, uf: str | None = None,
+                     faixa_etaria: str | None = None) -> str:
     """Escolhe o melhor termo para buscar uma pessoa no Jusbrasil (no navegador).
 
     CPF completo (11 dígitos, sem X) tem prioridade por ser exato; senão usa o nome.
     Máscara/meio de CPF não serve: o Jusbrasil não busca por CPF parcial.
+    UF e faixa etária só se aplicam à busca por nome (com CPF completo são ignorados,
+    porque o CPF já é exato).
 
     Args:
         cpf (str): CPF digitado (completo, máscara ou vazio).
         nome (str): nome digitado (pode ser vazio).
+        uf (str | None): sigla do estado para filtrar a busca por nome, ou None.
+        faixa_etaria (str | None): faixa etária (formato do Jusbrasil) para a busca
+            por nome, ou None.
 
     Returns:
         str: URL da busca.
@@ -50,10 +66,10 @@ def url_busca_pessoa(cpf: str, nome: str) -> str:
     """
     cpf = cpf or ""
     if "X" not in cpf.upper() and len(re.sub(r"\D", "", cpf)) == 11:
-        return url_busca(cpf)
+        return url_busca(cpf)  # CPF exato: filtros de UF/idade não fazem sentido
     nome = " ".join((nome or "").split())
     if len(nome.split()) >= 2:
-        return url_busca(nome)
+        return url_busca(nome, uf=uf, faixa_etaria=faixa_etaria)
     raise ValueError("Para o Jusbrasil informe o CPF completo (11 dígitos) ou o nome com sobrenome.")
 
 

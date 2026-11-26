@@ -22,7 +22,7 @@ import aiohttp
 
 from caminhos import pasta_resultados
 from cpf_finder import _API_HEADERS, fmt, generate_candidates, names_match, query_term_status
-from jusbrasil import scrape_jusbrasil_by_cpf, url_busca_pessoa
+from jusbrasil import url_busca_pessoa
 from ui.tema import Tema, icone_dica
 from ui.widgets import AreaLog, Tabela, adicionar_cartao, formatar_numero
 
@@ -46,17 +46,6 @@ COLUNAS = (
     ("skPessoa", "skPessoa", 110, False),
     ("relacao", "Relação GF", 240, True),
 )
-COLUNAS_JUS = (
-    ("nome", "Nome", 240, True),
-    ("cpf_mascarado", "CPF (jusbrasil)", 140, False),
-    ("idade", "Idade", 80, False),
-    ("estados", "Estados", 90, False),
-    ("processos", "Processos", 90, False),
-    ("tribunais", "Tribunais", 200, True),
-    ("anos", "Anos", 160, True),
-    ("url", "URL", 220, True),
-)
-
 DICA_WORKERS = (
     "Quantos CPFs são consultados no Portal ao mesmo tempo (1 a 50).\n\n"
     "Mais requisições = busca mais rápida, porém o Portal pode limitar ou bloquear "
@@ -72,6 +61,24 @@ DICA_MATCH_FROUXO = (
 DICA_SSL = (
     "Desliga a verificação do certificado de segurança (HTTPS) do Portal.\n\n"
     "Use só se a busca falhar com erro de certificado, comum em redes corporativas com proxy."
+)
+
+UFS = ("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
+       "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO")
+UF_TODAS = "Todas"
+# Faixa etária do Jusbrasil: rótulo amigável → valor do parâmetro ``faixaEtaria`` da URL.
+# Valores exatos do site (as quatro opções do seletor de idades).
+FAIXAS_ETARIAS: dict[str, str | None] = {
+    "Qualquer idade": None,
+    "Até 24 anos": "ate_24",
+    "Entre 25 e 44 anos": "entre_25_e_44",
+    "Entre 45 e 64 anos": "entre_45_e_64",
+    "65 anos ou mais": "acima_de_64",
+}
+DICA_FILTROS_JUS = (
+    "Filtros opcionais da busca por nome no Jusbrasil (que abre no navegador).\n\n"
+    "UF e faixa etária estreitam os resultados, iguais aos filtros do próprio site. "
+    "Com CPF completo eles são ignorados, porque o CPF já é exato."
 )
 
 
@@ -158,7 +165,7 @@ class AbaPessoa(ttk.Frame):
         self.entry_nome.grid(row=1, column=1, sticky="ew", pady=(6, 0))
         ttk.Label(cartao, style="Dica.TLabel", wraplength=360, justify=tk.LEFT,
                   text="Com nome, os registros são separados em confirmados e divergentes. "
-                       "Com 1 único confirmado, é oferecida a busca profunda no Jusbrasil.",
+                       "No resultado, o botão direito abre a pessoa no Jusbrasil (navegador).",
                   ).grid(row=2, column=1, rowspan=2, sticky="nw", pady=(6, 0))
 
         ttk.Separator(cartao).grid(row=4, column=0, columnspan=2, sticky="ew", pady=14)
@@ -199,6 +206,21 @@ class AbaPessoa(ttk.Frame):
         self.btn_buscar = ttk.Button(linha, text="Buscar", command=self._on_search, style="Destaque.TButton")
         self.btn_buscar.grid(row=0, column=5, sticky="e")
 
+        # Filtros do Jusbrasil (UF + faixa etária): só aparecem com a fonte Jusbrasil.
+        self.filtros_jus = ttk.Frame(cartao, style="Painel.TFrame")
+        self.filtros_jus.grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(self.filtros_jus, text="Filtros do Jusbrasil:", style="Painel.TLabel").pack(side=tk.LEFT)
+        icone_dica(self.filtros_jus, DICA_FILTROS_JUS, self.tema).pack(side=tk.LEFT, padx=(4, 14))
+        ttk.Label(self.filtros_jus, text="UF", style="Painel.TLabel").pack(side=tk.LEFT, padx=(0, 4))
+        self.cmb_uf = ttk.Combobox(self.filtros_jus, values=(UF_TODAS, *UFS), state="readonly", width=7)
+        self.cmb_uf.set(UF_TODAS)
+        self.cmb_uf.pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Label(self.filtros_jus, text="Faixa etária", style="Painel.TLabel").pack(side=tk.LEFT, padx=(0, 4))
+        self.cmb_faixa = ttk.Combobox(self.filtros_jus, values=list(FAIXAS_ETARIAS), state="readonly", width=18)
+        self.cmb_faixa.set(next(iter(FAIXAS_ETARIAS)))  # "Qualquer idade"
+        self.cmb_faixa.pack(side=tk.LEFT)
+        self.filtros_jus.grid_remove()  # começa oculto (fonte padrão é o Portal)
+
         for entry in (self.entry_cpf, self.entry_nome):
             entry.bind("<Return>", lambda _e: self._on_search())
         self._controles_portal = [self.spin_workers, self.chk_loose, self.chk_insecure]
@@ -210,8 +232,18 @@ class AbaPessoa(ttk.Frame):
         portal = self.var_fonte.get() == FONTE_PORTAL
         for w in self._controles_portal:
             w.configure(state="normal" if portal else "disabled")
+        if portal:
+            self.filtros_jus.grid_remove()
+        else:
+            self.filtros_jus.grid()
         self.btn_buscar.configure(text="Buscar" if portal else "Abrir no Jusbrasil ↗")
         self._atualizar_previa()
+
+    def _filtros_jusbrasil(self) -> tuple[str | None, str | None]:
+        """Lê UF e faixa etária escolhidas (None quando é "Todas"/"Qualquer idade")."""
+        uf = self.cmb_uf.get()
+        uf = None if uf in ("", UF_TODAS) else uf
+        return uf, FAIXAS_ETARIAS.get(self.cmb_faixa.get())
 
     def _opcao(self, pai, coluna: int, texto: str, var: tk.BooleanVar, dica: str) -> ttk.Checkbutton:
         caixa = ttk.Frame(pai, style="Painel.TFrame")
@@ -235,11 +267,6 @@ class AbaPessoa(ttk.Frame):
         self.tab_div = self._aba("Divergentes", lambda p: Tabela(
             p, self.tema, COLUNAS, self._status, coluna_copia="cpf",
             acoes_extras=[("Abrir no Jusbrasil (navegador)", lambda: self._jusbrasil_da_linha(self.tab_div))]))
-        self.tab_jus = self._aba("Jusbrasil", lambda p: Tabela(
-            p, self.tema, COLUNAS_JUS, self._status, coluna_copia="url",
-            acoes_extras=[("Abrir perfil no navegador", self._abrir_perfil_jusbrasil)],
-        ))
-        self.tab_jus.tree.bind("<Double-1>", lambda _e: self._abrir_perfil_jusbrasil())
         self.log = self._aba("Log", lambda p: AreaLog(p, self.tema))
         self._atualizar_abas()
 
@@ -314,7 +341,7 @@ class AbaPessoa(ttk.Frame):
             self.btn_txt.configure(state="normal" if (self.confirmados or self.divergentes) else "disabled")
 
     def _limpar_resultados(self):
-        for tabela in (self.tab_conf, self.tab_div, self.tab_jus):
+        for tabela in (self.tab_conf, self.tab_div):
             tabela.limpar()
         self.confirmados.clear()
         self.divergentes.clear()
@@ -392,14 +419,17 @@ class AbaPessoa(ttk.Frame):
                 return
             if not self.entry_nome.get().strip():
                 return
+        uf, faixa = self._filtros_jusbrasil()
         try:
-            url = url_busca_pessoa(self.var_cpf.get(), self.entry_nome.get())
+            url = url_busca_pessoa(self.var_cpf.get(), self.entry_nome.get(), uf=uf, faixa_etaria=faixa)
         except ValueError as e:
             messagebox.showerror("Jusbrasil", str(e))
             self.entry_nome.focus_set()
             return
         webbrowser.open(url)
-        self.lbl_status.configure(text="Busca aberta no navegador (Jusbrasil).")
+        detalhe = " · ".join(filter(None, [uf, self.cmb_faixa.get() if faixa else None]))
+        self.lbl_status.configure(
+            text=f"Busca aberta no navegador (Jusbrasil{f' — {detalhe}' if detalhe else ''}).")
 
     def _jusbrasil_da_linha(self, tabela: Tabela):
         sel = tabela.tree.selection()
@@ -509,50 +539,6 @@ class AbaPessoa(ttk.Frame):
         except Exception as e:
             self.queue.put(("error", str(e)))
 
-    # ── Jusbrasil ──────────────────────────────────────────────────────────
-    def _oferecer_busca_profunda(self):
-        """Se houver exatamente 1 confirmado, mostra e pergunta se quer buscar no Jusbrasil."""
-        if len(self.confirmados) != 1:
-            return
-        r = self.confirmados[0]
-        msg = (f"CPF: {r['cpf']}\nNome: {r['nome']}\nCPF (portal): {r['cpf_parcial']}\n"
-               f"skPessoa: {r['skPessoa']}\nRelação GF: {r['relacao'] or '—'}\n\n"
-               "Deseja fazer busca profunda no Jusbrasil?")
-        if messagebox.askyesno("Resultado único — busca profunda", msg):
-            self.log.escrever(f"→ Busca profunda: Jusbrasil para {r['cpf']}…", "info")
-            self.lbl_status.configure(text="Consultando Jusbrasil…")
-            self.notebook.select(2)
-            threading.Thread(target=self._run_jusbrasil, args=(r["cpf"],), daemon=True).start()
-
-    def _run_jusbrasil(self, cpf: str):
-        try:
-            result = asyncio.run(scrape_jusbrasil_by_cpf(cpf))
-        except Exception as e:
-            result = {"profiles": [], "error": str(e), "url": ""}
-        self.queue.put(("jusbrasil_done", result))
-
-    def _mostrar_jusbrasil(self, result: dict):
-        self.tab_jus.limpar()
-        self.notebook.select(2)
-        if result.get("error"):
-            self.log.escrever(f"⚠ Jusbrasil: {result['error']}", "aviso")
-            self.lbl_status.configure(text=f"Jusbrasil: {result['error']}")
-            return
-        profiles = result.get("profiles", [])
-        if not profiles:
-            self.log.escrever("→ Jusbrasil: nenhum perfil público encontrado para este CPF.", "info")
-            self.lbl_status.configure(text="Jusbrasil: sem resultados")
-            return
-        for p in profiles:
-            self.tab_jus.inserir([p[c[0]] for c in COLUNAS_JUS])
-        self.log.escrever(f"✓ Jusbrasil: {len(profiles)} perfil(is) encontrado(s).", "ok")
-        self.lbl_status.configure(text=f"Jusbrasil: {len(profiles)} perfil(is) — duplo clique abre no navegador")
-
-    def _abrir_perfil_jusbrasil(self):
-        urls = self.tab_jus.selecionados("url")
-        if urls and urls[0]:
-            webbrowser.open(urls[0])
-
     # ── Fila de eventos (thread de busca → UI) ────────────────────────────
     def _poll_queue(self):
         progresso = 0
@@ -602,7 +588,6 @@ class AbaPessoa(ttk.Frame):
                             self.log.escrever(
                                 "Atenção: candidatos que falharam não foram verificados. "
                                 "Reduza as requisições simultâneas e rode de novo para cobri-los.", "aviso")
-                        self.after(200, self._oferecer_busca_profunda)
                     else:
                         self.lbl_status.configure(text=f"Cancelado: {resumo}.")
                         self.log.escrever(f"Cancelado: {resumo}", "aviso")
@@ -610,9 +595,6 @@ class AbaPessoa(ttk.Frame):
                         self.notebook.select(0)
                     elif self.divergentes:
                         self.notebook.select(1)
-
-                elif kind == "jusbrasil_done":
-                    self._mostrar_jusbrasil(msg[1])
 
                 elif kind == "error":
                     self._set_buscando(False)
